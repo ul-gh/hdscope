@@ -36,4 +36,5 @@ FORMS += \
 DISTFILES += \
     MplWidget.py \
     main.py \
-    mplwidget.py
+    mplwidget.py \
+    hdscope.py

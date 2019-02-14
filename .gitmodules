@@ -1,0 +1,3 @@
+[submodule "python-ivi"]
+	path = python-ivi
+	url = https://github.com/ul-gh/python-ivi
