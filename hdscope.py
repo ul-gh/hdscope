@@ -2,7 +2,10 @@
 # -*- coding: utf-8 -*-
 import sys
 import random
+import atexit
 import numpy as np
+from IPython import get_ipython
+from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QMainWindow, QApplication
 import PyQt5.uic
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as MplToolbar
@@ -11,9 +14,14 @@ import importlib
 ivi = importlib.import_module("python-ivi.ivi")
 import filters
 
+get_ipython().run_line_magic("gui", "qt5")
+#get_ipython().run_line_magic("matplotlib", "qt5")
+
 class Config():
     scope = ivi.rigol.rigolDS1054Z(
-            "TCPIP0::169.254.11.100::5555::SOCKET",
+#            "TCPIP0::169.254.11.120::INSTR",
+            "TCPIP0::169.254.11.120::5555::SOCKET",
+            pyvisa_opts={"read_termination":"\n", "write_termination":"\n"},
             prefer_pyvisa=True)
     mdepth_text = ("24M", "12M", "6M", "3M", "2M", "1M", "500k", "250k", "125k")
     mdepth_values = (24, 12, 6, 3, 2, 1, 0.5, 0.25, 0.125)
@@ -83,8 +91,26 @@ class HDScope(QMainWindow):
         if not value in self.config.mdepth_values:
             self.mdepth.insertItem(0, f"{value:1.1e}", value)
 
+class WorkerThread(QThread):
+    signal = pyqtSignal("PyQt_PyObject")
+    
+    def __init__(self):
+        super().__init__()
 
-app = QApplication(sys.argv)
+    def __del__(self):
+        self.wait()
+
+    def run(self):
+        pass
+
+if QApplication.instance() is None:
+    app = QApplication(sys.argv) 
+
 window = HDScope(Config)
 window.show()
-app.exec_()
+atexit.register(window.scope.close)
+
+# Shortcuts for interactive use
+mplw = window.MplWidget
+scope = window.scope
+instr = window.scope._interface.instrument
