@@ -96,13 +96,14 @@ class MplWidget(QWidget):
                 ]
         self.canvas_qt.draw_idle()
 
-    def plot_new(self, ydata):
+    def plot_new(self, time_span, channels, ydata):
         self.subplot1.clear()
-        if len(ydata[0]) > 1:
-            for y_i in ydata:
+        time = np.arange(0.0, time_span, time_span/len(ydata))
+        print(f"Len_time: {len(time)}")
+        print(f"Len_ydata: {len(ydata[0].x)}")
+        for y_i in ydata:
+            if len(y_i) > 1:
                 self.subplot1.plot(y_i)
-        else:
-            self.subplot1.plot(ydata)
 #        self.subplot1.legend(('cosinus', 'sinus'),loc='upper right')
         self.subplot1.set_title('Scope Data')
         for i in self.cursors:

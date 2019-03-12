@@ -26,7 +26,8 @@ class Config():
     mdepth_text = ("24M", "12M", "6M", "3M", "2M", "1M", "500k", "250k", "125k")
     mdepth_values = (24, 12, 6, 3, 2, 1, 0.5, 0.25, 0.125)
     # Indexes of channels active at start. Starting at zero.
-    channels_active = {0}
+    channels = {0: "Channel 1", 1: "Channel 2", 2: "Channel 3", 3: "Channel 4"}
+    channels_active = {1: "Channel 1"}
 
 class HDScope(QMainWindow):
     def __init__(self, config):
@@ -44,8 +45,11 @@ class HDScope(QMainWindow):
         # Shortcut for oscilloscope IVI driver instance
         self.scope = config.scope
 
+        self.channels = config.channels
         self.channels_active = config.channels_active
-        self.ydata = [0.0] * 4
+        self.ydata = [[0.0], ] * 4
+        # FIXME
+        self.time_span = float(self.scope._ask("acq:mdepth?"))/float(self.scope._ask("acq:srate?"))
 
         for text, value in zip(config.mdepth_text, config.mdepth_values):
             self.mdepth.addItem(text, value)
@@ -70,15 +74,23 @@ class HDScope(QMainWindow):
 
     def _set_channel_active(self, i, activation=True):
         if activation:
-            self.channels_active.add(i)
+            self.channels_active.update({i:self.channels[i]})
         else:
-            self.channels_active.remove(i)
+            self.channels_active.pop(i)
 
     def _pull_data(self):
         print("pull data!")
+        reset_state = False
+        # This is the current acquisition mode "run" is True, "stop" is False
+        state = self.scope.trigger.continuous
+        if state and self.mdepth.currentData() > 1200:
+            self.scope.trigger.continuous = False
+            reset_state = True
         for i in self.channels_active:
             self.ydata[i] = self.scope.channels[i].measurement.fetch_waveform()
-        self.MplWidget.plot_new(self.ydata)
+        if reset_state:
+            self.scope.trigger.continuous = state
+        self.MplWidget.plot_new(self.time_span, self.channels_active, self.ydata)
 
     def _set_mdepth(self, selection):
         n_samples = int(self.mdepth.currentData() * 10E6)
