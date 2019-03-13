@@ -18,7 +18,8 @@ import filters
 get_ipython().run_line_magic("gui", "qt5")
 #get_ipython().run_line_magic("matplotlib", "qt5")
 
-class Config():
+class HardwareInterface():
+    """Interface to the ADC/Oscilloscope hardware data source and external controls"""
     scope = ivi.rigol.rigolDS1054Z(
 #            "TCPIP0::169.254.11.120::INSTR",
             "TCPIP0::169.254.11.120::5555::SOCKET",
@@ -29,54 +30,6 @@ class Config():
     # Indexes of channels active at start. Starting at zero.
     channels = {0: "Channel 1", 1: "Channel 2", 2: "Channel 3", 3: "Channel 4"}
     channels_active = {0: "Channel 1"}
-    # Filter length, default is moving average filter.
-    filter_length = 120
-
-class HDScope(QMainWindow):
-    def __init__(self, config):
-        super().__init__()
-        # Loads Qt Designer .ui file and creates an instance of the user
-        # interface in this QMainWindow instance. This automatically adds
-        # any further widgets defined in the .ui file to this main instance.
-        # (e.g. MplWidget)
-        PyQt5.uic.loadUi("hdscope.ui", baseinstance=self)
-        self.setWindowTitle("PyQt5 & Matplotlib HD Oscilloscope")
-        self.addToolBar(MplToolbar(self.MplWidget.canvas_qt, self))
-
-        # All configuration settings
-        self.config = config
-        # Shortcut for oscilloscope IVI driver instance
-        self.scope = config.scope
-
-        self.channels = config.channels
-        self.channels_active = config.channels_active
-        self.filter_length = config.filter_length
-        self.ydata = [[0.0], ] * 4
-        # FIXME
-        #self.time_span = float(self.scope._ask("acq:mdepth?"))/float(self.scope._ask("acq:srate?"))
-
-        for text, value in zip(config.mdepth_text, config.mdepth_values):
-            self.select_mdepth.addItem(text, value)
-        self.mdepth.activated[str].connect(self._set_mdepth)
-        
-        self.pull_data.clicked.connect(self._pull_data)
-        self.apply_filter.clicked.connect(self.apply_filter)
-
-        # Beware this is early-binding the channel number to _set_channel_active
-        self.ch1.clicked.connect(partial(self._set_channel_active, 0))
-        self.ch2.clicked.connect(partial(self._set_channel_active, 1))
-        self.ch3.clicked.connect(partial(self._set_channel_active, 2))
-        self.ch4.clicked.connect(partial(self._set_channel_active, 3))
-#        self.ch4.clicked.connect(self.MplWidget.update_graph_simulation)
-
-        self.H1.stateChanged.connect(self.MplWidget.cursors[0].set_enabled)
-        self.MplWidget.cursors[0].callback = self.H1.setChecked
-        self.H2.stateChanged.connect(self.MplWidget.cursors[1].set_enabled)
-        self.MplWidget.cursors[1].callback = self.H2.setChecked
-        self.V1.stateChanged.connect(self.MplWidget.cursors[2].set_enabled)
-        self.MplWidget.cursors[2].callback = self.V1.setChecked
-        self.V2.stateChanged.connect(self.MplWidget.cursors[3].set_enabled)
-        self.MplWidget.cursors[3].callback = self.V2.setChecked
 
     def _set_channel_active(self, i, activation=True):
         if activation:
@@ -109,6 +62,7 @@ class HDScope(QMainWindow):
             n_samples = value
         print(f"Requesting memory depth (number of samples): {n_samples}")
         self.scope.acquisition.number_of_points_minimum = n_samples
+
     def _get_mdepth(self):
         """Get memory depth value from scope, update self.n_samples and Qt
         widget if necessary"""
@@ -127,6 +81,46 @@ class HDScope(QMainWindow):
         print(f"Sample rate is: {value}")
         self.n_samples = value
 
+
+class SampleData():
+    """Measurement data model, data-dependent filter and DSP methods"""
+    # Filter length, default is moving average filter.
+    filter_length = 120
+
+
+class Workspace(HardwareInterface, SampleData, QtUi):
+    """Central Controller"""
+    ydata = [[0.0], ] * 4
+    
+    def __init__(self):
+        super().__init__()
+
+        # FIXME
+        #self.time_span = float(self.scope._ask("acq:mdepth?"))/float(self.scope._ask("acq:srate?"))
+
+        for text, value in zip(config.mdepth_text, config.mdepth_values):
+            self.select_mdepth.addItem(text, value)
+        self.mdepth.activated[str].connect(self._set_mdepth)
+        
+        self.pull_data.clicked.connect(self._pull_data)
+        self.apply_filter.clicked.connect(self.apply_filter)
+
+        # Beware this is early-binding the channel number to _set_channel_active
+        self.ch1.clicked.connect(partial(self._set_channel_active, 0))
+        self.ch2.clicked.connect(partial(self._set_channel_active, 1))
+        self.ch3.clicked.connect(partial(self._set_channel_active, 2))
+        self.ch4.clicked.connect(partial(self._set_channel_active, 3))
+#        self.ch4.clicked.connect(self.MplWidget.update_graph_simulation)
+
+        self.H1.stateChanged.connect(self.MplWidget.cursors[0].set_enabled)
+        self.MplWidget.cursors[0].callback = self.H1.setChecked
+        self.H2.stateChanged.connect(self.MplWidget.cursors[1].set_enabled)
+        self.MplWidget.cursors[1].callback = self.H2.setChecked
+        self.V1.stateChanged.connect(self.MplWidget.cursors[2].set_enabled)
+        self.MplWidget.cursors[2].callback = self.V1.setChecked
+        self.V2.stateChanged.connect(self.MplWidget.cursors[3].set_enabled)
+        self.MplWidget.cursors[3].callback = self.V2.setChecked
+
     def apply_filter(self, channel):
         """Apply filter"""
         self.ydata[channel] = filters.moving_average1(
@@ -136,6 +130,44 @@ class HDScope(QMainWindow):
     def update_plot(self):
         self.MplWidget.plot_new(self.sample_rate, self.n_samples,
                 self.channels_active, self.ydata)
+
+
+
+class QtUi(QMainWindow, Config):
+    def __init__(self):
+        super().__init__()
+        # Loads Qt Designer .ui file and creates an instance of the user
+        # interface in this QMainWindow instance. This automatically adds
+        # any further widgets defined in the .ui file to this main instance.
+        # (e.g. MplWidget)
+        PyQt5.uic.loadUi("hdscope.ui", baseinstance=self)
+        self.setWindowTitle("PyQt5 & Matplotlib HD Oscilloscope")
+        self.addToolBar(MplToolbar(self.MplWidget.canvas_qt, self))
+
+
+        for text, value in zip(config.mdepth_text, config.mdepth_values):
+            self.select_mdepth.addItem(text, value)
+        self.mdepth.activated[str].connect(self._set_mdepth)
+        
+        self.pull_data.clicked.connect(self._pull_data)
+        self.apply_filter.clicked.connect(self.apply_filter)
+
+        # Beware this is early-binding the channel number to _set_channel_active
+        self.ch1.clicked.connect(partial(self._set_channel_active, 0))
+        self.ch2.clicked.connect(partial(self._set_channel_active, 1))
+        self.ch3.clicked.connect(partial(self._set_channel_active, 2))
+        self.ch4.clicked.connect(partial(self._set_channel_active, 3))
+#        self.ch4.clicked.connect(self.MplWidget.update_graph_simulation)
+
+        self.H1.stateChanged.connect(self.MplWidget.cursors[0].set_enabled)
+        self.MplWidget.cursors[0].callback = self.H1.setChecked
+        self.H2.stateChanged.connect(self.MplWidget.cursors[1].set_enabled)
+        self.MplWidget.cursors[1].callback = self.H2.setChecked
+        self.V1.stateChanged.connect(self.MplWidget.cursors[2].set_enabled)
+        self.MplWidget.cursors[2].callback = self.V1.setChecked
+        self.V2.stateChanged.connect(self.MplWidget.cursors[3].set_enabled)
+        self.MplWidget.cursors[3].callback = self.V2.setChecked
+
 
 
 class WorkerThread(QThread):
@@ -153,7 +185,7 @@ class WorkerThread(QThread):
 if QApplication.instance() is None:
     app = QApplication(sys.argv) 
 
-window = HDScope(Config)
+window = HDScope()
 window.show()
 atexit.register(window.scope.close)
 
