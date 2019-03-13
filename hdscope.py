@@ -20,7 +20,7 @@ get_ipython().run_line_magic("gui", "qt5")
 class Config():
     scope = ivi.rigol.rigolDS1054Z(
 #            "TCPIP0::169.254.11.120::INSTR",
-            "TCPIP0::169.254.11.120::5555::SOCKET",
+            "TCPIP0::localhost::5555::SOCKET",
             pyvisa_opts={"read_termination":"\n", "write_termination":"\n"},
             prefer_pyvisa=True)
     mdepth_text = ("24M", "12M", "6M", "3M", "2M", "1M", "500k", "250k", "125k")
