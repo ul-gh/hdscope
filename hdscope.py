@@ -4,6 +4,7 @@ import sys
 import random
 import atexit
 import numpy as np
+from functools import partial
 from IPython import get_ipython
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QMainWindow, QApplication
@@ -22,12 +23,14 @@ class Config():
 #            "TCPIP0::169.254.11.120::INSTR",
             "TCPIP0::169.254.11.120::5555::SOCKET",
             pyvisa_opts={"read_termination":"\n", "write_termination":"\n"},
-            prefer_pyvisa=True)
+            prefer_pyvisa=True,)
     mdepth_text = ("24M", "12M", "6M", "3M", "2M", "1M", "500k", "250k", "125k")
     mdepth_values = (24, 12, 6, 3, 2, 1, 0.5, 0.25, 0.125)
     # Indexes of channels active at start. Starting at zero.
     channels = {0: "Channel 1", 1: "Channel 2", 2: "Channel 3", 3: "Channel 4"}
-    channels_active = {1: "Channel 1"}
+    channels_active = {0: "Channel 1"}
+    # Filter length, default is moving average filter.
+    filter_length = 120
 
 class HDScope(QMainWindow):
     def __init__(self, config):
@@ -47,21 +50,24 @@ class HDScope(QMainWindow):
 
         self.channels = config.channels
         self.channels_active = config.channels_active
+        self.filter_length = config.filter_length
         self.ydata = [[0.0], ] * 4
         # FIXME
-        self.time_span = float(self.scope._ask("acq:mdepth?"))/float(self.scope._ask("acq:srate?"))
+        #self.time_span = float(self.scope._ask("acq:mdepth?"))/float(self.scope._ask("acq:srate?"))
 
         for text, value in zip(config.mdepth_text, config.mdepth_values):
-            self.mdepth.addItem(text, value)
+            self.select_mdepth.addItem(text, value)
         self.mdepth.activated[str].connect(self._set_mdepth)
         
         self.pull_data.clicked.connect(self._pull_data)
+        self.apply_filter.clicked.connect(self.apply_filter)
 
-        self.ch1.clicked.connect(lambda x: self._set_channel_active(0, x))
-        self.ch2.clicked.connect(lambda x: self._set_channel_active(1, x))
-        self.ch3.clicked.connect(lambda x: self._set_channel_active(2, x))
-        # FIXME: Test only
-        self.ch4.clicked.connect(self.MplWidget.update_graph_simulation)
+        # Beware this is early-binding the channel number to _set_channel_active
+        self.ch1.clicked.connect(partial(self._set_channel_active, 0))
+        self.ch2.clicked.connect(partial(self._set_channel_active, 1))
+        self.ch3.clicked.connect(partial(self._set_channel_active, 2))
+        self.ch4.clicked.connect(partial(self._set_channel_active, 3))
+#        self.ch4.clicked.connect(self.MplWidget.update_graph_simulation)
 
         self.H1.stateChanged.connect(self.MplWidget.cursors[0].set_enabled)
         self.MplWidget.cursors[0].callback = self.H1.setChecked
@@ -80,28 +86,57 @@ class HDScope(QMainWindow):
 
     def _pull_data(self):
         print("pull data!")
-        reset_state = False
         # This is the current acquisition mode "run" is True, "stop" is False
-        state = self.scope.trigger.continuous
-        if state and self.mdepth.currentData() > 1200:
+        acquisition_running = self.scope.trigger.continuous
+        if acquisition_running and self.mdepth.currentData() > 1200:
             self.scope.trigger.continuous = False
-            reset_state = True
+        # Updates self.sample_rate and Qt buton if necessary
+        self._get_sample_rate()
+        # Updates self.n_samples and Qt button if necessary
+        self._get_mdepth()
         for i in self.channels_active:
             self.ydata[i] = self.scope.channels[i].measurement.fetch_waveform()
-        if reset_state:
-            self.scope.trigger.continuous = state
-        self.MplWidget.plot_new(self.time_span, self.channels_active, self.ydata)
+        if acquisition_running:
+            self.scope.trigger.continuous = True
+        self.update_plot()
 
-    def _set_mdepth(self, selection):
-        n_samples = int(self.mdepth.currentData() * 10E6)
-        print(f"Numeric: {n_samples}")
+    def _set_mdepth(self, value=None):
+        """Send memory depth requested value to the connected device.
+        Does NOT update self.n_samples """
+        if value is None:
+            n_samples = int(self.mdepth.currentData() * 10E6)
+        else:
+            n_samples = value
+        print(f"Requesting memory depth (number of samples): {n_samples}")
         self.scope.acquisition.number_of_points_minimum = n_samples
     def _get_mdepth(self):
-        print("Getting mdepth")
-        value = self.scope.acquisition.record_length()
-        print(f"Value is: {value}")
+        """Get memory depth value from scope, update self.n_samples and Qt
+        widget if necessary"""
+        # This is an ivi driver call:
+        value = self.scope.acquisition.record_length
+        print(f"Number of samples is: {value}")
         if not value in self.config.mdepth_values:
             self.mdepth.insertItem(0, f"{value:1.1e}", value)
+        self.n_samples = value
+
+    def _get_sample_rate(self):
+        """Get sample rate value from scope, update self.sample_rate and Qt
+        widget if necessary"""
+        # This is an ivi driver call:
+        value = self.scope.acquisition.sample_rate
+        print(f"Sample rate is: {value}")
+        self.n_samples = value
+
+    def apply_filter(self, channel):
+        """Apply filter"""
+        self.ydata[channel] = filters.moving_average1(
+                self.ydata[channel], self.filter_length)
+        self.update_plot()
+
+    def update_plot(self):
+        self.MplWidget.plot_new(self.sample_rate, self.n_samples,
+                self.channels_active, self.ydata)
+
 
 class WorkerThread(QThread):
     signal = pyqtSignal("PyQt_PyObject")
@@ -126,3 +161,4 @@ atexit.register(window.scope.close)
 mplw = window.MplWidget
 scope = window.scope
 instr = window.scope._interface.instrument
+

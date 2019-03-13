@@ -24,7 +24,7 @@
     <item>
      <widget class="QTabWidget" name="scope_view">
       <property name="currentIndex">
-       <number>1</number>
+       <number>0</number>
       </property>
       <widget class="QWidget" name="tab_view">
        <attribute name="title">
@@ -54,21 +54,35 @@
            </widget>
           </item>
           <item>
-           <widget class="QComboBox" name="mdepth">
+           <widget class="QComboBox" name="ui_mdepth">
             <property name="currentText">
              <string/>
             </property>
            </widget>
           </item>
           <item>
-           <widget class="QPushButton" name="pull_data">
+           <widget class="QPushButton" name="ui_pull_data">
             <property name="text">
              <string>pull data</string>
             </property>
            </widget>
           </item>
           <item>
-           <widget class="QCheckBox" name="poll_cyclic">
+           <widget class="QPushButton" name="ui_apply_filter">
+            <property name="text">
+             <string>apply filter</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="ui_update_plot">
+            <property name="text">
+             <string>update_plot</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="ui_poll_cyclic">
             <property name="text">
              <string>poll cyclic</string>
             </property>
@@ -108,28 +122,28 @@
            </spacer>
           </item>
           <item>
-           <widget class="QCheckBox" name="ch1">
+           <widget class="QCheckBox" name="ui_ch1">
             <property name="text">
              <string>CH1</string>
             </property>
            </widget>
           </item>
           <item>
-           <widget class="QCheckBox" name="ch2">
+           <widget class="QCheckBox" name="ui_ch2">
             <property name="text">
              <string>CH2</string>
             </property>
            </widget>
           </item>
           <item>
-           <widget class="QCheckBox" name="ch3">
+           <widget class="QCheckBox" name="ui_ch3">
             <property name="text">
              <string>CH3</string>
             </property>
            </widget>
           </item>
           <item>
-           <widget class="QCheckBox" name="ch4">
+           <widget class="QCheckBox" name="ui_ch4">
             <property name="text">
              <string>CH4</string>
             </property>
@@ -149,7 +163,7 @@
            </spacer>
           </item>
           <item>
-           <widget class="QComboBox" name="start_sample">
+           <widget class="QComboBox" name="ui_start_sample">
             <property name="editable">
              <bool>true</bool>
             </property>
@@ -159,7 +173,7 @@
            </widget>
           </item>
           <item>
-           <widget class="QComboBox" name="display_range">
+           <widget class="QComboBox" name="ui_display_range">
             <property name="editable">
              <bool>true</bool>
             </property>
@@ -182,28 +196,35 @@
            </spacer>
           </item>
           <item>
-           <widget class="QCheckBox" name="V1">
+           <widget class="QLabel" name="label_2">
+            <property name="text">
+             <string>Cursors:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="ui_V1">
             <property name="text">
              <string>V1</string>
             </property>
            </widget>
           </item>
           <item>
-           <widget class="QCheckBox" name="V2">
+           <widget class="QCheckBox" name="ui_V2">
             <property name="text">
              <string>V2</string>
             </property>
            </widget>
           </item>
           <item>
-           <widget class="QCheckBox" name="H1">
+           <widget class="QCheckBox" name="ui_H1">
             <property name="text">
              <string>H1</string>
             </property>
            </widget>
           </item>
           <item>
-           <widget class="QCheckBox" name="H2">
+           <widget class="QCheckBox" name="ui_H2">
             <property name="text">
              <string>H2</string>
             </property>
