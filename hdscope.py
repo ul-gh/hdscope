@@ -18,19 +18,115 @@ import filters
 get_ipython().run_line_magic("gui", "qt5")
 #get_ipython().run_line_magic("matplotlib", "qt5")
 
+class Config():
+    ip_addr = 169.254.11.120
+    tcp_port = 5555
+
+class DataModel():
+    pass
+
+class AnalogChannel():
+    def __init__(
+            self,
+            ivi_driver,
+            samples_buffer,
+            index=0,
+            desc="Channel xyz",
+            unit="V",
+            active=True,
+            invert=False,
+            scale=1.0,
+            probe_atten=10.0,
+            offset=0.0,
+            hw_bandwidth=1*10**9,
+            time_skew=0.0,
+            coupling="DC",
+            impedance="1000000",
+            ):
+        self.ivi_driver = ivi_driver
+        self.index = index
+        self.desc = desc
+        self.active = active
+        self.invert = invert
+        self.scale = scale
+        self.probe_atten = probe_atten
+        self.offset = ofset
+        self.unit = unit
+        self.hw_bandwidth = hw_bandwidth
+        self.time_skew = time_skew
+        self.coupling = coupling
+        self.impedance = impedance
+
+    def pull_hw_props(self):
+        """Update properties from hardware settings"""
+        ch_drv = self.ivi_driver.channels[self.index]
+        # Some of these are renamed..
+        self.active = ch_drv.enabled
+        self.invert = ch_drv.invert
+        self.scale = ch_drv.scale
+        self.probe_atten = ch_drv.probe_attenuation
+        self.offset = ch_drv.offset
+        self.hw_bandwidth = ch_drv.input_frequency_max
+        self.time_skew = ch_drv.probe_skew
+        self.coupling = ch_drv.coupling
+        self.impedance = ch_drv.input_impedance
+    def push_hw_props(self):
+        """Push settings to hardware"""
+        ch_drv = self.ivi_driver.channels[self.index]
+        # Some of these are renamed..
+        ch_drv.enabled = self.active
+        ch_drv.invert = self.invert
+        ch_drv.scale = ch_drv.scale
+        ch_drv.probe_attenuation = self.probe_atten
+        ch_drv.offset = self.offset
+        ch_drv.input_frequency_max = self.hw_bandwidth
+        ch_drv.probe_skew = self.time_skew
+        ch_drv.coupling = self.coupling
+        ch_drv.input_impedance = self.impedance
+
+    def pull_samples(self):
+        """Pull acquired samples from hardware if available.
+        This is a non-blocking method. Returns "True" if data was read.
+        """
+        drv = self.ivi_driver
+        if drv.measurement.status == "complete": 
+            self.samples_buffer = drv.channels[self.index].fetch_waveform().y
+            return True
+        else:
+            return False
+ 
+
+
+
 class HardwareInterface():
-    """Interface to the ADC/Oscilloscope hardware data source and external controls"""
-    scope = ivi.rigol.rigolDS1054Z(
-#            "TCPIP0::169.254.11.120::INSTR",
-            "TCPIP0::169.254.11.120::5555::SOCKET",
-            pyvisa_opts={"read_termination":"\n", "write_termination":"\n"},
-            prefer_pyvisa=True,)
-    mdepth_text = ("24M", "12M", "6M", "3M", "2M", "1M", "500k", "250k", "125k")
-    mdepth_values = (24, 12, 6, 3, 2, 1, 0.5, 0.25, 0.125)
+    """Interface to the ADC/Oscilloscope data source and external controls"""
+    # Number of samples per acquisition. Text keywords are used for the GUI.
+    mdepth_opts = {
+        "24M": 24000000,
+        "12M": 12000000,
+        "6M": 6000000,
+        "3M": 3000000,
+        "2M": 2000000,
+        "1M": 1000000,
+        "500k": 500000,
+        "250k": 250000,
+        "125k": 125000,
+        }
     # Indexes of channels active at start. Starting at zero.
-    channels = {0: "Channel 1", 1: "Channel 2", 2: "Channel 3", 3: "Channel 4"}
+    channels = {
+            0: {active: False, "Channel 1",
+        1: "Channel 2",
+        2: "Channel 3",
+        3: "Channel 4"
+        }
     channels_active = {0: "Channel 1"}
 
+    def __init__(self, config):
+        self.scope = ivi.rigol.rigolDS1054Z(
+                # "TCPIP0::169.254.11.120::INSTR",
+                f"TCPIP0::{config.ip_addr}::{config.tcp_port}::SOCKET",
+                pyvisa_opts={"read_termination":"\n", "write_termination":"\n"},
+                prefer_pyvisa=True,)
     def _set_channel_active(self, i, activation=True):
         if activation:
             self.channels_active.update({i:self.channels[i]})
