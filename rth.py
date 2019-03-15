@@ -62,7 +62,7 @@ class Rohde_Schwarz_RTH():
         self.dev.write("FORM INT,16;:FORM:BORD LSBF")
         # Wait for acquisition to finish
         self.dev.query('*OPC?')
-        samples_raw = self.dev.query_binary_values(
+        samples_raw = self.dev.querry_binary_values(
                 f"CHAN{ch}:DATA?",
                 datatype="h",
                 header_fmt="ieee",
@@ -114,8 +114,8 @@ class Rohde_Schwarz_RTH():
 
 
 
-rth_resource_VXI = "TCPIP0::192.168.0.1::INSTR"
-rth_resource_socket = "TCPIP0::192.168.0.1::5025::SOCKET"
+#rth_resource_VXI = "TCPIP0::192.168.0.1::INSTR"
+rth_resource_socket = "TCPIP0::169.254.11.120::5025::SOCKET"
 #rth_resource_socket = "TCPIP0::RTH-103752::5025::SOCKET"
 
 #rth = Rohde_Schwarz_RTH(rth_resource_socket)
