@@ -18,89 +18,16 @@ import filters
 get_ipython().run_line_magic("gui", "qt5")
 #get_ipython().run_line_magic("matplotlib", "qt5")
 
+
 class Config():
-    ip_addr = 169.254.11.120
-    tcp_port = 5555
-
-class DataModel():
-    pass
-
-class AnalogChannel():
-    def __init__(
-            self,
-            ivi_driver,
-            samples_buffer,
-            index=0,
-            desc="Channel xyz",
-            unit="V",
-            active=True,
-            invert=False,
-            scale=1.0,
-            probe_atten=10.0,
-            offset=0.0,
-            hw_bandwidth=1*10**9,
-            time_skew=0.0,
-            coupling="DC",
-            impedance="1000000",
-            ):
-        self.ivi_driver = ivi_driver
-        self.index = index
-        self.desc = desc
-        self.active = active
-        self.invert = invert
-        self.scale = scale
-        self.probe_atten = probe_atten
-        self.offset = ofset
-        self.unit = unit
-        self.hw_bandwidth = hw_bandwidth
-        self.time_skew = time_skew
-        self.coupling = coupling
-        self.impedance = impedance
-
-    def pull_hw_props(self):
-        """Update properties from hardware settings"""
-        ch_drv = self.ivi_driver.channels[self.index]
-        # Some of these are renamed..
-        self.active = ch_drv.enabled
-        self.invert = ch_drv.invert
-        self.scale = ch_drv.scale
-        self.probe_atten = ch_drv.probe_attenuation
-        self.offset = ch_drv.offset
-        self.hw_bandwidth = ch_drv.input_frequency_max
-        self.time_skew = ch_drv.probe_skew
-        self.coupling = ch_drv.coupling
-        self.impedance = ch_drv.input_impedance
-    def push_hw_props(self):
-        """Push settings to hardware"""
-        ch_drv = self.ivi_driver.channels[self.index]
-        # Some of these are renamed..
-        ch_drv.enabled = self.active
-        ch_drv.invert = self.invert
-        ch_drv.scale = ch_drv.scale
-        ch_drv.probe_attenuation = self.probe_atten
-        ch_drv.offset = self.offset
-        ch_drv.input_frequency_max = self.hw_bandwidth
-        ch_drv.probe_skew = self.time_skew
-        ch_drv.coupling = self.coupling
-        ch_drv.input_impedance = self.impedance
-
-    def pull_samples(self):
-        """Pull acquired samples from hardware if available.
-        This is a non-blocking method. Returns "True" if data was read.
-        """
-        drv = self.ivi_driver
-        if drv.measurement.status == "complete": 
-            self.samples_buffer = drv.channels[self.index].fetch_waveform().y
-            return True
-        else:
-            return False
- 
-
-
-
-class HardwareInterface():
-    """Interface to the ADC/Oscilloscope data source and external controls"""
+    driver_class = ivi.rigol.rigolDS1104Z
+    ip_addr = "169.254.11.120"
+    tcp_port = "5555"
+    n_channels = 4
+    # First channel is active after start-up
+    ch_active_flags = [True, False, False, False]
     # Number of samples per acquisition. Text keywords are used for the GUI.
+    # The  highest memory depth value determines the internal buffer size.
     mdepth_opts = {
         "24M": 24000000,
         "12M": 12000000,
@@ -112,32 +39,134 @@ class HardwareInterface():
         "250k": 250000,
         "125k": 125000,
         }
-    # Indexes of channels active at start. Starting at zero.
-    channels = {
-            0: {active: False, "Channel 1",
-        1: "Channel 2",
-        2: "Channel 3",
-        3: "Channel 4"
-        }
-    channels_active = {0: "Channel 1"}
+    # Set numpy float precision.
+    # Beware 100 Megasamples is 800 Megabytes RAM at 64 bit.
+    # Filters typically need another three to six times the per-channel RAM
+    float_precision = np.float64
 
+
+
+class AnalogChannel():
+    def __init__(
+            self,
+            ivi_driver,
+            ch_buffer, # Call by reference
+            ch_active_flags, # Call by reference
+            index=0,
+            active_on_start=True,
+            desc="Channel xyz",
+            unit="V",
+            invert=False,
+            scale=1.0,
+            probe_atten=10.0,
+            offset=0.0,
+            # Request hardware bandwidth limit less or equal to value supplied
+            bw_limit_max=1*10**12,
+            time_skew=0.0,
+            coupling="DC",
+            impedance="1000000",
+            ):
+        self.ivi_driver = ivi_driver
+        self.ch_buffer = ch_buffer
+        self.ch_active_flags[index] = active_on_start # Assign to reference
+        self.index = index
+        self.desc = desc
+        self.invert = invert
+        self.scale = scale
+        self.probe_atten = probe_atten
+        self.offset = ofset
+        self.unit = unit
+        self.bw_limit_max = bw_limit_max
+        self.time_skew = time_skew
+        self.coupling = coupling
+        self.impedance = impedance
+
+    def pull_hw_props(self):
+        """Update properties from hardware settings"""
+        ch_drv = self.ivi_driver.channels[self.index]
+        # Some of these are renamed..
+        self.ch_active_flags[self.index] = ch_drv.enabled # Assign to reference
+        self.invert = ch_drv.invert
+        self.scale = ch_drv.scale
+        self.probe_atten = ch_drv.probe_attenuation
+        self.offset = ch_drv.offset
+        self.bw_limit_max = ch_drv.input_frequency_max
+        self.time_skew = ch_drv.probe_skew
+        self.coupling = ch_drv.coupling
+        self.impedance = ch_drv.input_impedance
+    def push_hw_props(self):
+        """Push settings to hardware"""
+        ch_drv = self.ivi_driver.channels[self.index]
+        # Some of these are renamed..
+        ch_drv.enabled = self.ch_active_flags[self.index]
+        ch_drv.invert = self.invert
+        ch_drv.scale = ch_drv.scale
+        ch_drv.probe_attenuation = self.probe_atten
+        ch_drv.offset = self.offset
+        ch_drv.input_frequency_max = self.bw_limit_max
+        ch_drv.probe_skew = self.time_skew
+        ch_drv.coupling = self.coupling
+        ch_drv.input_impedance = self.impedance
+
+    def pull_samples(self):
+        """Pull acquired samples from hardware if available.
+        This is a non-blocking method. Returns "True" if data was read.
+        """
+        drv = self.ivi_driver
+        # FIXME: Measurement status != acquisition status?!
+        if drv.measurement.status == "complete": 
+            # Assign to reference
+            self.ch_buffer[self.index] = np.array(
+                    drv.channels[self.index].fetch_waveform().y
+                    )
+            return True
+        else:
+            return False
+
+
+class HardwareInterface():
+    """Interface to the ADC/Oscilloscope data source and external controls"""
     def __init__(self, config):
-        self.scope = ivi.rigol.rigolDS1054Z(
-                # "TCPIP0::169.254.11.120::INSTR",
+        self.driver = config.driver_class(
                 f"TCPIP0::{config.ip_addr}::{config.tcp_port}::SOCKET",
                 pyvisa_opts={"read_termination":"\n", "write_termination":"\n"},
                 prefer_pyvisa=True,)
-    def _set_channel_active(self, i, activation=True):
-        if activation:
-            self.channels_active.update({i:self.channels[i]})
-        else:
-            self.channels_active.pop(i)
+        self.n_channels = config.n_channels
+        self.ch_active_flags = config.ch_active_flags
+        # Initialize with maximum memory configuration to be safe.
+        # In case this fails due to low memory, this fails early.
+        ch_buflen = max(self.mdepth_opts.values())
+        # Analog channel buffer for data access
+        # self.ch_buffers = np.zeros(
+        #         (self.n_channels, ch_buflen),
+        #         dtype = config.float_precision,
+        #         )
+        self.ch_buffers = [0] * self.n_channels
+        # Analog channel objects for channel-by-channel hardware interaction
+        self.ch = [
+                AnalogChannel(
+                    ivi_driver=self.driver,
+                    ch_buffer=self.ch_buffers[i],
+                    index=i,
+                    desc=f"Channel {i}")
+                for i in range(self.n_channels)
+                ]
 
-    def _pull_data(self):
+    def _set_channel_active(self, index, activation=True):
+        if activation:
+            self.ch_active_flags[index] = True
+        else:
+            self.ch_active_flags[index] = False
+
+    def _pull_data(self, len_min=1200):
         print("pull data!")
         # This is the current acquisition mode "run" is True, "stop" is False
         acquisition_running = self.scope.trigger.continuous
-        if acquisition_running and self.mdepth.currentData() > 1200:
+        # Only 1200 points can be read while in active RUN state, as far as
+        # Rigol DS1054Z etc. are concerned. Assuming this is a common device,
+        # using this as a default threshold to put the device to stop mode for
+        # reading.
+        if acquisition_running and len_min > 1200:
             self.scope.trigger.continuous = False
         # Updates self.sample_rate and Qt buton if necessary
         self._get_sample_rate()
@@ -162,6 +191,7 @@ class HardwareInterface():
     def _get_mdepth(self):
         """Get memory depth value from scope, update self.n_samples and Qt
         widget if necessary"""
+        # FIXME: Use callback to UI here
         # This is an ivi driver call:
         value = self.scope.acquisition.record_length
         print(f"Number of samples is: {value}")
@@ -178,10 +208,13 @@ class HardwareInterface():
         self.n_samples = value
 
 
-class SampleData():
+class DataModel():
     """Measurement data model, data-dependent filter and DSP methods"""
     # Filter length, default is moving average filter.
     filter_length = 120
+    def __init__(self, hw_interface):
+
+
 
 
 class Workspace(HardwareInterface, SampleData, QtUi):
