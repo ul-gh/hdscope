@@ -26,6 +26,9 @@ class Config():
     n_channels = 4
     # First channel is active after start-up
     ch_active_flags = [True, False, False, False]
+    # If set to true, all configuation changes made in the controller or
+    # GUI are propagated to the hardware.
+    hw_online_mode = True
     # Number of samples per acquisition. Text keywords are used for the GUI.
     # The  highest memory depth value determines the internal buffer size.
     mdepth_opts = {
@@ -39,6 +42,10 @@ class Config():
         "250k": 250000,
         "125k": 125000,
         }
+    # 125k samples default
+    mdepth_default = 125000
+    # 1 GS/s default
+    sample_rate_default = 1000000000
     # Set numpy float precision.
     # Beware 100 Megasamples is 800 Megabytes RAM at 64 bit.
     # Filters typically need another three to six times the per-channel RAM
@@ -125,14 +132,32 @@ class AnalogChannel():
 
 
 class HardwareInterface():
-    """Interface to the ADC/Oscilloscope data source and external controls"""
-    def __init__(self, config):
-        self.driver = config.driver_class(
+    """Interface to the ADC/Oscilloscope data source and external controls.
+    
+    Init args:
+    config:     Configuration settings object, see config file
+    cbX_config: List of callback functions run when any config
+                setting changes, e.g. update the GUI.
+    cbX_data:   List of callbacks run when new data is available
+    """
+    def __init__(
+            self,
+            config,
+            # Mutable default arguments are on purpose here..
+            cbX_config=[],
+            cbX_data=[],
+            ):
+        self.cbX_config = cbX_config
+        self.cbX_data = cbX_data
+        self.scope = config.driver_class(
                 f"TCPIP0::{config.ip_addr}::{config.tcp_port}::SOCKET",
                 pyvisa_opts={"read_termination":"\n", "write_termination":"\n"},
-                prefer_pyvisa=True,)
+                prefer_pyvisa=True,
+                )
         self.n_channels = config.n_channels
         self.ch_active_flags = config.ch_active_flags
+        self.sample_rate = config.sample_rate_default
+        self.hw_mdepth = config.mdepth_default
         # Initialize with maximum memory configuration to be safe.
         # In case this fails due to low memory, this fails early.
         ch_buflen = max(self.mdepth_opts.values())
@@ -141,22 +166,43 @@ class HardwareInterface():
         #         (self.n_channels, ch_buflen),
         #         dtype = config.float_precision,
         #         )
-        self.ch_buffers = [0] * self.n_channels
+        self.ch_bufers = [0] * self.n_channels
         # Analog channel objects for channel-by-channel hardware interaction
         self.ch = [
                 AnalogChannel(
-                    ivi_driver=self.driver,
+                    ivi_driver=self.scope,
                     ch_buffer=self.ch_buffers[i],
                     index=i,
                     desc=f"Channel {i}")
                 for i in range(self.n_channels)
                 ]
+        # If set to true, all configuation changes made in the controller or
+        # GUI are propagated to the hardware.
+        self.hw_online_mode = config.hw_online_mode
+    
+    def register_cb_data(self, callback):
+        if callback not in self.cbX_data:
+            self.cbX_data.append(callback)
+    def register_cb_config(self, callback):
+        if callback not in self.cbX_config:
+            self.cbX_config.append(callback)
 
+    def _run_cbX_config(self):
+        for callback in self.cbX_config:
+            callback()
+    def _run_cbX_data(self):
+        for callback in self.cbX_data:
+            callback()
+
+    def _get_channel_active(self, index):
+        if hw_online_mode:
+            self.ch[index].pull_hw_props()
+        self._run_cbX_config()
     def _set_channel_active(self, index, activation=True):
-        if activation:
-            self.ch_active_flags[index] = True
-        else:
-            self.ch_active_flags[index] = False
+        self.ch_active_flags[index] = activation
+        if hw_online_mode:
+            self.ch[index].push_hw_props()
+        self._run_cbX_config()
 
     def _pull_data(self, len_min=1200):
         print("pull data!")
@@ -172,57 +218,56 @@ class HardwareInterface():
         self._get_sample_rate()
         # Updates self.n_samples and Qt button if necessary
         self._get_mdepth()
-        for i in self.channels_active:
-            self.ydata[i] = self.scope.channels[i].measurement.fetch_waveform()
+        for i in range(self.n_channels):
+            self.ch[i].pull_samples()
         if acquisition_running:
             self.scope.trigger.continuous = True
-        self.update_plot()
+        self._run_cbX_data()
 
     def _set_mdepth(self, value=None):
         """Send memory depth requested value to the connected device.
         Does NOT update self.n_samples """
-        if value is None:
-            n_samples = int(self.mdepth.currentData() * 10E6)
-        else:
-            n_samples = value
-        print(f"Requesting memory depth (number of samples): {n_samples}")
-        self.scope.acquisition.number_of_points_minimum = n_samples
-
+        if value is not None:
+            self.hw_mdepth = int(value)
+        if hw_online_mode:
+            print(f"Requesting memory depth (number of samples): {self.hw_mdepth}")
+            # This is a driver call
+            self.scope.acquisition.number_of_points_minimum = self.hw_mdepth
+        self._run_cbX_config()
     def _get_mdepth(self):
-        """Get memory depth value from scope, update self.n_samples and Qt
-        widget if necessary"""
-        # FIXME: Use callback to UI here
+        """Get memory depth value from scope, update property and call callbacks
+        """
         # This is an ivi driver call:
-        value = self.scope.acquisition.record_length
-        print(f"Number of samples is: {value}")
-        if not value in self.config.mdepth_values:
-            self.mdepth.insertItem(0, f"{value:1.1e}", value)
-        self.n_samples = value
+        if hw_online_mode:
+            self.hw_mdepth = self.scope.acquisition.record_length
+        print(f"Number of samples is: {self.hw_mdepth}")
+        self._run_cbX_config()
 
     def _get_sample_rate(self):
         """Get sample rate value from scope, update self.sample_rate and Qt
         widget if necessary"""
-        # This is an ivi driver call:
-        value = self.scope.acquisition.sample_rate
-        print(f"Sample rate is: {value}")
-        self.n_samples = value
+        if hw_online_mode:
+            # This is an ivi driver call:
+            self.sample_rate = self.scope.acquisition.sample_rate
+        print(f"Sample rate is: {self.sample_rate}")
+        self._run_cbX_config()
 
 
 class DataModel():
     """Measurement data model, data-dependent filter and DSP methods"""
     # Filter length, default is moving average filter.
     filter_length = 120
-    def __init__(self, hw_interface):
-
-
-
-
-class Workspace(HardwareInterface, SampleData, QtUi):
-    """Central Controller"""
-    ydata = [[0.0], ] * 4
-    
     def __init__(self):
-        super().__init__()
+        self.
+
+
+
+
+#FIXME compose instead of inherit
+class Workspace():
+    """Central Controller"""
+    def __init__(self, config, data_model, hw_interface, qt_ui):
+        #super().__init__()
 
         # FIXME
         #self.time_span = float(self.scope._ask("acq:mdepth?"))/float(self.scope._ask("acq:srate?"))
