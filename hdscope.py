@@ -44,13 +44,19 @@ class Config():
         }
     # 125k samples default
     mdepth_default = 125000
+    # Initialize with maximum memory configuration to be safe.
+    # In case this fails due to low memory, this fails early.
+    mdepth_max = max(mdepth_opts.values())
     # 1 GS/s default
     sample_rate_default = 1000000000
     # Set numpy float precision.
     # Beware 100 Megasamples is 800 Megabytes RAM at 64 bit.
     # Filters typically need another three to six times the per-channel RAM
     float_precision = np.float64
-
+    # FIR filter kernel length
+    filter_length = 120
+    # Default filter setting
+    filter_chain = filters.moving_average1
 
 
 class AnalogChannel():
@@ -136,19 +142,21 @@ class HardwareInterface():
     
     Init args:
     config:     Configuration settings object, see config file
+    ch_buffers: List or array of n_channels sample data buffers of sufficient
+                length to hold the maximum mdepth setting of samples
     cbX_config: List of callback functions run when any config
                 setting changes, e.g. update the GUI.
     cbX_data:   List of callbacks run when new data is available
+
     """
     def __init__(
             self,
             config,
+            ch_buffers,
             # Mutable default arguments are on purpose here..
             cbX_config=[],
             cbX_data=[],
             ):
-        self.cbX_config = cbX_config
-        self.cbX_data = cbX_data
         self.scope = config.driver_class(
                 f"TCPIP0::{config.ip_addr}::{config.tcp_port}::SOCKET",
                 pyvisa_opts={"read_termination":"\n", "write_termination":"\n"},
@@ -157,16 +165,9 @@ class HardwareInterface():
         self.n_channels = config.n_channels
         self.ch_active_flags = config.ch_active_flags
         self.sample_rate = config.sample_rate_default
-        self.hw_mdepth = config.mdepth_default
-        # Initialize with maximum memory configuration to be safe.
-        # In case this fails due to low memory, this fails early.
-        ch_buflen = max(self.mdepth_opts.values())
-        # Analog channel buffer for data access
-        # self.ch_buffers = np.zeros(
-        #         (self.n_channels, ch_buflen),
-        #         dtype = config.float_precision,
-        #         )
-        self.ch_bufers = [0] * self.n_channels
+        self.mdepth = config.mdepth_default
+        # Buffer is handed over from the data model
+        self.ch_buffers = ch_buffers
         # Analog channel objects for channel-by-channel hardware interaction
         self.ch = [
                 AnalogChannel(
@@ -179,6 +180,10 @@ class HardwareInterface():
         # If set to true, all configuation changes made in the controller or
         # GUI are propagated to the hardware.
         self.hw_online_mode = config.hw_online_mode
+        # Callbacks to react on hardware button presses etc
+        self.cbX_config = cbX_config
+        # Callbacks to react on updated data (using polling)
+        self.cbX_data = cbX_data
     
     def register_cb_data(self, callback):
         if callback not in self.cbX_data:
@@ -228,19 +233,19 @@ class HardwareInterface():
         """Send memory depth requested value to the connected device.
         Does NOT update self.n_samples """
         if value is not None:
-            self.hw_mdepth = int(value)
+            self.mdepth = int(value)
         if hw_online_mode:
-            print(f"Requesting memory depth (number of samples): {self.hw_mdepth}")
+            print(f"Requesting memory depth (number of samples): {self.mdepth}")
             # This is a driver call
-            self.scope.acquisition.number_of_points_minimum = self.hw_mdepth
+            self.scope.acquisition.number_of_points_minimum = self.mdepth
         self._run_cbX_config()
     def _get_mdepth(self):
         """Get memory depth value from scope, update property and call callbacks
         """
         # This is an ivi driver call:
         if hw_online_mode:
-            self.hw_mdepth = self.scope.acquisition.record_length
-        print(f"Number of samples is: {self.hw_mdepth}")
+            self.mdepth = self.scope.acquisition.record_length
+        print(f"Number of samples is: {self.mdepth}")
         self._run_cbX_config()
 
     def _get_sample_rate(self):
@@ -255,56 +260,34 @@ class HardwareInterface():
 
 class DataModel():
     """Measurement data model, data-dependent filter and DSP methods"""
-    # Filter length, default is moving average filter.
-    filter_length = 120
-    def __init__(self):
-        self.
+    def __init__(self, config, hw_interface):
+        # Analog channel buffer for data access
+        # Initialize with maximum memory configuration to be safe.
+        # In case this fails due to low memory, this fails early.
+        # self.ch_buffers = np.zeros(
+        #         (config.n_channels, config.mdepth_max),
+        #         dtype = config.float_precision,
+        #         )
+        self.ch_buffers = [np.zeros(config.mdepth_max)] * config.n_channels
+        # Filter kernel length
+        self.filter_length = config.filter_length
+        self.filter_chain = config.filter_chain
+        # Callbacks to react on updated data
+        self.cbX_data = cbX_data
 
+    def apply_filters(self, channels):
+        """Apply filters defined as self.filter_chain"""
+        for i in channels:
+            self.filter_chain[i](self.ch_buffer[i], self.filter_length)
+        self.exec_cbX()
+    
+    def register_cb_data(self, callback):
+        if callback not in self.cbX_data:
+            self.cbX_data.append(callback)
 
-
-
-#FIXME compose instead of inherit
-class Workspace():
-    """Central Controller"""
-    def __init__(self, config, data_model, hw_interface, qt_ui):
-        #super().__init__()
-
-        # FIXME
-        #self.time_span = float(self.scope._ask("acq:mdepth?"))/float(self.scope._ask("acq:srate?"))
-
-        for text, value in zip(config.mdepth_text, config.mdepth_values):
-            self.select_mdepth.addItem(text, value)
-        self.mdepth.activated[str].connect(self._set_mdepth)
-        
-        self.pull_data.clicked.connect(self._pull_data)
-        self.apply_filter.clicked.connect(self.apply_filter)
-
-        # Beware this is early-binding the channel number to _set_channel_active
-        self.ch1.clicked.connect(partial(self._set_channel_active, 0))
-        self.ch2.clicked.connect(partial(self._set_channel_active, 1))
-        self.ch3.clicked.connect(partial(self._set_channel_active, 2))
-        self.ch4.clicked.connect(partial(self._set_channel_active, 3))
-#        self.ch4.clicked.connect(self.MplWidget.update_graph_simulation)
-
-        self.H1.stateChanged.connect(self.MplWidget.cursors[0].set_enabled)
-        self.MplWidget.cursors[0].callback = self.H1.setChecked
-        self.H2.stateChanged.connect(self.MplWidget.cursors[1].set_enabled)
-        self.MplWidget.cursors[1].callback = self.H2.setChecked
-        self.V1.stateChanged.connect(self.MplWidget.cursors[2].set_enabled)
-        self.MplWidget.cursors[2].callback = self.V1.setChecked
-        self.V2.stateChanged.connect(self.MplWidget.cursors[3].set_enabled)
-        self.MplWidget.cursors[3].callback = self.V2.setChecked
-
-    def apply_filter(self, channel):
-        """Apply filter"""
-        self.ydata[channel] = filters.moving_average1(
-                self.ydata[channel], self.filter_length)
-        self.update_plot()
-
-    def update_plot(self):
-        self.MplWidget.plot_new(self.sample_rate, self.n_samples,
-                self.channels_active, self.ydata)
-
+    def exec_cbX(self):
+        for i in self.cbX_data:
+            self.cbX_data()
 
 
 class QtUi(QMainWindow, Config):
@@ -342,6 +325,9 @@ class QtUi(QMainWindow, Config):
         self.V2.stateChanged.connect(self.MplWidget.cursors[3].set_enabled)
         self.MplWidget.cursors[3].callback = self.V2.setChecked
 
+    def update_plot(self):
+        self.MplWidget.plot_new(self.sample_rate, self.n_samples,
+                self.channels_active, self.ydata)
 
 
 class WorkerThread(QThread):
@@ -355,6 +341,10 @@ class WorkerThread(QThread):
 
     def run(self):
         pass
+
+model = DataModel(
+
+
 
 if QApplication.instance() is None:
     app = QApplication(sys.argv) 
