@@ -5,7 +5,6 @@ import random
 import atexit
 import numpy as np
 from functools import partial
-from IPython import get_ipython
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QMainWindow, QApplication
 import PyQt5.uic
@@ -15,8 +14,9 @@ import importlib
 ivi = importlib.import_module("python-ivi.ivi")
 import filters
 
-get_ipython().run_line_magic("gui", "qt5")
-#get_ipython().run_line_magic("matplotlib", "qt5")
+if "get_ipython" in globals():
+    get_ipython().run_line_magic("gui", "qt5")
+    #get_ipython().run_line_magic("matplotlib", "qt5")
 
 
 class Config():
@@ -301,29 +301,28 @@ class QtUi(QMainWindow, Config):
         self.setWindowTitle("PyQt5 & Matplotlib HD Oscilloscope")
         self.addToolBar(MplToolbar(self.MplWidget.canvas_qt, self))
 
-
         for text, value in zip(config.mdepth_text, config.mdepth_values):
-            self.select_mdepth.addItem(text, value)
-        self.mdepth.activated[str].connect(self._set_mdepth)
+            self.inputbox_mdepth.addItem(text, value)
+        self.inputbox_mdepth.activated[str].connect(self._set_mdepth)
         
-        self.pull_data.clicked.connect(self._pull_data)
-        self.apply_filter.clicked.connect(self.apply_filter)
+        self.btn_pull_data.clicked.connect(self._pull_data)
+        self.btn_apply_filter.clicked.connect(self.apply_filter)
 
         # Beware this is early-binding the channel number to _set_channel_active
-        self.ch1.clicked.connect(partial(self._set_channel_active, 0))
-        self.ch2.clicked.connect(partial(self._set_channel_active, 1))
-        self.ch3.clicked.connect(partial(self._set_channel_active, 2))
-        self.ch4.clicked.connect(partial(self._set_channel_active, 3))
+        self.checkbox_ch1.clicked.connect(partial(self._set_channel_active, 0))
+        self.checkbox_ch2.clicked.connect(partial(self._set_channel_active, 1))
+        self.checkbox_ch3.clicked.connect(partial(self._set_channel_active, 2))
+        self.checkbox_ch4.clicked.connect(partial(self._set_channel_active, 3))
 #        self.ch4.clicked.connect(self.MplWidget.update_graph_simulation)
 
-        self.H1.stateChanged.connect(self.MplWidget.cursors[0].set_enabled)
-        self.MplWidget.cursors[0].callback = self.H1.setChecked
-        self.H2.stateChanged.connect(self.MplWidget.cursors[1].set_enabled)
-        self.MplWidget.cursors[1].callback = self.H2.setChecked
-        self.V1.stateChanged.connect(self.MplWidget.cursors[2].set_enabled)
-        self.MplWidget.cursors[2].callback = self.V1.setChecked
-        self.V2.stateChanged.connect(self.MplWidget.cursors[3].set_enabled)
-        self.MplWidget.cursors[3].callback = self.V2.setChecked
+        self.checkbox_H1.stateChanged.connect(self.MplWidget.cursors[0].set_enabled)
+        self.MplWidget.cursors[0].callback = self.checkbox_H1.setChecked
+        self.checkbox_H2.stateChanged.connect(self.MplWidget.cursors[1].set_enabled)
+        self.MplWidget.cursors[1].callback = self.checkbox_H2.setChecked
+        self.checkbox_V1.stateChanged.connect(self.MplWidget.cursors[2].set_enabled)
+        self.MplWidget.cursors[2].callback = self.checkbox_V1.setChecked
+        self.checkbox_V2.stateChanged.connect(self.MplWidget.cursors[3].set_enabled)
+        self.MplWidget.cursors[3].callback = self.checkbox_V2.setChecked
 
     def update_plot(self):
         self.MplWidget.plot_new(self.sample_rate, self.n_samples,
