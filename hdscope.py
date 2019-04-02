@@ -144,19 +144,18 @@ class HardwareInterface():
     config:     Configuration settings object, see config file
     ch_buffers: List or array of n_channels sample data buffers of sufficient
                 length to hold the maximum mdepth setting of samples
+    
+    Public members:
     cbX_config: List of callback functions run when any config
                 setting changes, e.g. update the GUI.
     cbX_data:   List of callbacks run when new data is available
 
     """
-    def __init__(
-            self,
-            config,
-            ch_buffers,
-            # Mutable default arguments are on purpose here..
-            cbX_config=[],
-            cbX_data=[],
-            ):
+    # Callbacks to react on hardware button presses etc
+    cbX_config = []
+    # Callbacks to react on updated data (using polling)
+    cbX_data = []
+    def __init__(self, config, ch_buffers):
         self.scope = config.driver_class(
                 f"TCPIP0::{config.ip_addr}::{config.tcp_port}::SOCKET",
                 pyvisa_opts={"read_termination":"\n", "write_termination":"\n"},
@@ -180,10 +179,6 @@ class HardwareInterface():
         # If set to true, all configuation changes made in the controller or
         # GUI are propagated to the hardware.
         self.hw_online_mode = config.hw_online_mode
-        # Callbacks to react on hardware button presses etc
-        self.cbX_config = cbX_config
-        # Callbacks to react on updated data (using polling)
-        self.cbX_data = cbX_data
     
     def register_cb_data(self, callback):
         if callback not in self.cbX_data:
@@ -260,7 +255,9 @@ class HardwareInterface():
 
 class DataModel():
     """Measurement data model, data-dependent filter and DSP methods"""
-    def __init__(self, config, hw_interface):
+    # List of callbacks to update GUI and possible outputs on updated data
+    cbX_data = []
+    def __init__(self, config):
         # Analog channel buffer for data access
         # Initialize with maximum memory configuration to be safe.
         # In case this fails due to low memory, this fails early.
@@ -272,8 +269,6 @@ class DataModel():
         # Filter kernel length
         self.filter_length = config.filter_length
         self.filter_chain = config.filter_chain
-        # Callbacks to react on updated data
-        self.cbX_data = cbX_data
 
     def apply_filters(self, channels):
         """Apply filters defined as self.filter_chain"""
@@ -289,9 +284,13 @@ class DataModel():
         for i in self.cbX_data:
             self.cbX_data()
 
+    def poll_loop(self):
+        pass
+        #FIXME
 
-class QtUi(QMainWindow, Config):
-    def __init__(self):
+
+class QtUi(QMainWindow):
+    def __init__(self, config, model, hw_if):
         super().__init__()
         # Loads Qt Designer .ui file and creates an instance of the user
         # interface in this QMainWindow instance. This automatically adds
@@ -341,19 +340,22 @@ class WorkerThread(QThread):
     def run(self):
         pass
 
-model = DataModel(
 
+################################################################
+# MAIN APPLICATION HERE:
+model = DataModel(Config)
+hw_if = HardwareInterface(Config, model.ch_buffers)
+if QApplication.instance() is None: app = QApplication(sys.argv) 
+qt_gui = QtUi(Config, model, hw_if)
 
+# FIXME: poll thread etc
 
-if QApplication.instance() is None:
-    app = QApplication(sys.argv) 
-
-window = HDScope()
-window.show()
-atexit.register(window.scope.close)
+qt_gui.show()
+atexit.register(hw_if.scope.close)
+################################################################
 
 # Shortcuts for interactive use
-mplw = window.MplWidget
-scope = window.scope
-instr = window.scope._interface.instrument
+mplw = qt_gui.MplWidget
+scope = hw_if.scope
+instr = hw_if.scope._interface.instrument
 
